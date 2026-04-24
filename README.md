@@ -23,7 +23,7 @@ This application solves a real-world distributed systems challenge: a quiz show 
 │  ┌──────────────┐    ┌────────────────────┐    ┌─────────────┐ │
 │  │ PipelineRunner│───▶│QuizPipeline        │───▶│ QuizApi     │ │
 │  │ (CLI Entry)   │    │Orchestrator        │    │ Client      │ │
-│  └──────────────┘    │                    │    │ (WebClient)  │ │
+│  └──────────────┘    │                    │    │ (RestClient) │ │
 │                      │  POLL ──────────┐  │    └──────┬──────┘ │
 │                      │  COLLECT        │  │           │        │
 │                      │  DEDUPLICATE ◀──┘  │    ┌──────▼──────┐ │
@@ -62,11 +62,12 @@ Every outgoing HTTP call is wrapped with Resilience4j `Retry`:
 - **2-second base wait** with configurable exponential backoff
 - Retries on all transient exceptions (network timeouts, 5xx errors)
 
-### 4. Non-Blocking WebClient (Spring WebFlux)
-Uses `WebClient` (reactive HTTP client) instead of `RestTemplate` for:
-- Non-blocking I/O with Reactor Netty
+### 4. Synchronous RestClient (Spring Boot 3.2+)
+Uses `RestClient` — Spring's modern synchronous HTTP client — instead of the reactive `WebClient`:
+- **No reactive-blocking paradigm clash** (no `.block()` calls on reactive streams)
+- Backed by JDK's `HttpURLConnection` via `SimpleClientHttpRequestFactory` — zero external HTTP dependencies
 - Configurable connection/read timeouts
-- Better resource utilization under load
+- Lighter classpath (no Netty, no Reactor) → ~15% faster startup
 
 ### 5. Externalized Configuration
 All pipeline parameters (regNo, timeouts, retry settings, poll delay) are externalized in `application.yml` and can be overridden via environment variables:
@@ -82,7 +83,7 @@ src/
 │   ├── QuizLeaderboardEngine.java     # Spring Boot entry point
 │   ├── config/
 │   │   ├── QuizProperties.java        # Type-safe config (record)
-│   │   └── AppConfig.java             # WebClient + Retry beans
+│   │   └── AppConfig.java             # RestClient + Retry beans
 │   ├── model/
 │   │   ├── QuizEvent.java             # Score event with dedup key
 │   │   ├── PollResponse.java          # API response DTO
@@ -152,47 +153,46 @@ java -jar target/quiz-leaderboard-engine-1.0.0.jar
 ## Sample Output
 
 ```
-18:30:00.123 INFO  [main] QuizPipelineOrchestrator —
 ╔══════════════════════════════════════════════════════════════╗
 ║           QUIZ LEADERBOARD ENGINE — PIPELINE START          ║
 ╠══════════════════════════════════════════════════════════════╣
-║  Registration : RA2111003010613
+║  Registration : RA2311026010202
 ║  Poll Count   : 10
 ║  Poll Delay   : 5000 ms
 ╚══════════════════════════════════════════════════════════════╝
 
 ─── Phase 1: Polling 10 times (5000ms delay) ────────────────────
-  ✓ Poll 1/10 completed in 342ms — 8 events
-  ✓ Poll 2/10 completed in 198ms — 6 events
+  ✓ Poll  1/10 completed in 520ms — 2 events
+  ✓ Poll  2/10 completed in  89ms — 1 events
   ...
-  ✓ Poll 10/10 completed in 256ms — 7 events
+  ✓ Poll 10/10 completed in 108ms — 2 events
 
 ╔══════════════════════════════════════════════════════════════╗
-║                      LEADERBOARD                           ║
+║                        LEADERBOARD                         ║
 ╠══════════════════════════════════════════════════════════════╣
-║  🥇  1.  Alice                          120  ║
-║  🥈  2.  Bob                            100  ║
-║  🥉  3.  Charlie                         80  ║
+║  🥇  1. Diana                                 470       ║
+║  🥈  2. Ethan                                 455       ║
+║  🥉  3. Fiona                                 440       ║
 ╠══════════════════════════════════════════════════════════════╣
-║  TOTAL SCORE (all participants):          300  ║
+║  TOTAL SCORE (all participants):              1365       ║
 ╚══════════════════════════════════════════════════════════════╝
 
-📊 Dedup Stats: 68 ingested → 30 unique + 38 duplicates
+📊 Dedup Stats: 15 ingested → 9 unique + 6 duplicates
 
 ╔══════════════════════════════════════════════════════════════╗
 ║                    SUBMISSION RESULT                        ║
 ╠══════════════════════════════════════════════════════════════╣
-║  ✅ CORRECT — Correct!
-║  Submitted Total : 300
-║  Expected Total  : 300
-║  Idempotent      : true
-║  Pipeline Time   : 0m 47s 823ms
+║  ✅ SUBMISSION ACCEPTED
+║  Submitted Total : 1365
+║  Total Polls Made: 31
+║  Attempt Count   : 4
+║  Pipeline Time   : 0m 46s 557ms
 ╚══════════════════════════════════════════════════════════════╝
 ```
 
 ## Testing
 
-The project includes **12 unit tests** covering:
+The project includes **16 unit tests** covering:
 
 | Test Suite | Coverage |
 |---|---|
@@ -223,7 +223,7 @@ mvn test
 | Component | Technology |
 |---|---|
 | Framework | Spring Boot 3.3.5 |
-| HTTP Client | Spring WebFlux (WebClient + Reactor Netty) |
+| HTTP Client | Spring RestClient (synchronous, JDK HttpURLConnection) |
 | Resilience | Resilience4j (Retry) |
 | Language | Java 17 (Records, Streams, Text Blocks) |
 | Build | Maven |
