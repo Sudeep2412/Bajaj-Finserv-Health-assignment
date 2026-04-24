@@ -7,14 +7,19 @@ import com.bajaj.quiz.model.SubmitResponse;
 import io.github.resilience4j.retry.Retry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.util.function.Supplier;
 
 /**
- * HTTP client for the quiz validator API.
+ * Synchronous HTTP client for the quiz validator API.
+ * <p>
+ * Uses Spring Boot 3.2+ {@link RestClient} — a modern, fluent, <b>synchronous</b>
+ * HTTP client. Unlike the reactive {@code WebClient}, there is no paradigm clash:
+ * no {@code .block()} calls, no Reactor subscriptions, no Netty event loop.
  * <p>
  * All outgoing calls are wrapped with Resilience4j {@link Retry} to handle
  * transient network failures with exponential backoff.
@@ -24,12 +29,12 @@ public class QuizApiClient {
 
     private static final Logger log = LoggerFactory.getLogger(QuizApiClient.class);
 
-    private final WebClient webClient;
+    private final RestClient restClient;
     private final Retry retry;
     private final QuizProperties props;
 
-    public QuizApiClient(WebClient webClient, Retry retry, QuizProperties props) {
-        this.webClient = webClient;
+    public QuizApiClient(RestClient restClient, Retry retry, QuizProperties props) {
+        this.restClient = restClient;
         this.retry = retry;
         this.props = props;
     }
@@ -44,22 +49,17 @@ public class QuizApiClient {
         Supplier<PollResponse> supplier = Retry.decorateSupplier(retry, () -> {
             log.debug("→ GET /quiz/messages?regNo={}&poll={}", props.regNo(), pollIndex);
 
-            PollResponse response = webClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/quiz/messages")
-                            .queryParam("regNo", props.regNo())
-                            .queryParam("poll", pollIndex)
-                            .build())
+            PollResponse response = restClient.get()
+                    .uri("/quiz/messages?regNo={regNo}&poll={poll}", props.regNo(), pollIndex)
+                    .accept(MediaType.APPLICATION_JSON)
                     .retrieve()
-                    .bodyToMono(PollResponse.class)
-                    .block();
+                    .body(PollResponse.class);
 
             if (response == null) {
                 throw new RuntimeException("Null response for poll " + pollIndex);
             }
 
-            log.debug("← Poll {} returned {} events (set={})",
-                    pollIndex, response.events().size(), response.setId());
+            log.debug("← Poll {} returned {} events", pollIndex, response.events().size());
             return response;
         });
 
@@ -82,12 +82,12 @@ public class QuizApiClient {
         Supplier<SubmitResponse> supplier = Retry.decorateSupplier(retry, () -> {
             log.debug("→ POST /quiz/submit with {} entries", request.leaderboard().size());
 
-            SubmitResponse response = webClient.post()
+            SubmitResponse response = restClient.post()
                     .uri("/quiz/submit")
-                    .bodyValue(request)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request)
                     .retrieve()
-                    .bodyToMono(SubmitResponse.class)
-                    .block();
+                    .body(SubmitResponse.class);
 
             if (response == null) {
                 throw new RuntimeException("Null response from submit endpoint");
@@ -97,8 +97,8 @@ public class QuizApiClient {
 
         try {
             return supplier.get();
-        } catch (WebClientResponseException e) {
-            log.error("✗ Submit failed — HTTP {}: {}", e.getStatusCode(), e.getResponseBodyAsString());
+        } catch (RestClientException e) {
+            log.error("✗ Submit failed: {}", e.getMessage());
             throw e;
         }
     }
