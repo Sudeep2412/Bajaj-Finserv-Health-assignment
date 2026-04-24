@@ -1,0 +1,37 @@
+# ──────────────────────────────────────────────────────────────
+# Quiz Leaderboard Engine — Configuration
+# ──────────────────────────────────────────────────────────────
+
+quiz:
+  # Registration number — CHANGE THIS to your actual regNo
+  reg-no: "${REG_NO:RA2311026010202}"
+
+  # Validator API base URL
+  base-url: https://devapigw.vidalhealthtpa.com/srm-quiz-task
+
+  # Polling configuration
+  poll-count: 10               # Number of polls (0–9)
+  poll-delay-ms: 5000          # Mandatory 5-second delay between polls
+
+  # Resilience — Retry configuration
+  retry:
+    max-attempts: 3            # Max retry attempts per poll
+    wait-duration-ms: 2000     # Wait between retries
+    backoff-multiplier: 2.0    # Exponential backoff multiplier
+
+  # HTTP client configuration
+  http:
+    connect-timeout-ms: 5000
+    read-timeout-ms: 10000
+
+spring:
+  main:
+    web-application-type: none   # CLI app, no web server needed
+  jackson:
+    default-property-inclusion: non_null
+
+logging:
+  level:
+    com.bajaj.quiz: DEBUG
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %highlight(%-5level) [%thread] %cyan(%logger{36}) — %msg%n"
